@@ -1,3 +1,0 @@
-/Users/mohanverma/StudioProjects/tarsosDSPPOC/app/lint-baseline.xml: Information: 1 error and 18 warnings were filtered out because they are listed in the baseline file, lint-baseline.xml
- [LintBaseline]
-0 errors, 0 warnings (1 error, 18 warnings filtered by baseline lint-baseline.xml)

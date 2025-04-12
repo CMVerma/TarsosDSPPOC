@@ -1,4 +1,0 @@
-#Sat Apr 12 21:32:32 IST 2025
-base.0=/Users/mohanverma/StudioProjects/tarsosDSPPOC/app/build/intermediates/dex/release/mergeDexRelease/classes.dex
-renamed.0=classes.dex
-path.0=classes.dex
