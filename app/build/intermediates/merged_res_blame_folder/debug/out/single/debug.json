@@ -1,0 +1,22 @@
+[
+    {
+        "merged": "com.example.tarsosdsppoc.app-merged_res-31:/xml_security_config.xml.flat",
+        "source": "com.example.tarsosdsppoc.app-main-33:/xml/security_config.xml"
+    },
+    {
+        "merged": "com.example.tarsosdsppoc.app-merged_res-31:/mipmap-mdpi_ic_launcher.xml.flat",
+        "source": "com.example.tarsosdsppoc.app-main-33:/mipmap-mdpi/ic_launcher.xml"
+    },
+    {
+        "merged": "com.example.tarsosdsppoc.app-merged_res-31:/xml_network_security_config.xml.flat",
+        "source": "com.example.tarsosdsppoc.app-main-33:/xml/network_security_config.xml"
+    },
+    {
+        "merged": "com.example.tarsosdsppoc.app-merged_res-31:/layout_activity_main.xml.flat",
+        "source": "com.example.tarsosdsppoc.app-main-33:/layout/activity_main.xml"
+    },
+    {
+        "merged": "com.example.tarsosdsppoc.app-merged_res-31:/xml_data_extraction_rules.xml.flat",
+        "source": "com.example.tarsosdsppoc.app-main-33:/xml/data_extraction_rules.xml"
+    }
+]
