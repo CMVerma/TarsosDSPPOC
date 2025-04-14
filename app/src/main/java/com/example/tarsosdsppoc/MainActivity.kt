@@ -29,6 +29,7 @@ import android.widget.Spinner
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Switch
+import com.example.tarsosdsppoc.databinding.ActivityMainBinding
 
 class MainActivity : AppCompatActivity() {
     companion object {
@@ -39,7 +40,8 @@ class MainActivity : AppCompatActivity() {
         private const val PERMISSION_REQUEST_CODE = 123
         private const val STORAGE_PERMISSION_REQUEST_CODE = 124
         private const val MIN_FREQUENCY = 50.0f  // Hz
-        private const val MAX_FREQUENCY = 1000.0f // Hz
+        private const val MAX_FREQUENCY = 2000.0f // Hz
+        private const val AMPLITUDE_THRESHOLD = 0.05f  // Consistent amplitude threshold
         private const val DEFAULT_GAIN = 1.0f
         private const val MAX_GAIN = 3.0f
         private const val DEFAULT_REVERB_MIX = 0.4f
@@ -47,6 +49,7 @@ class MainActivity : AppCompatActivity() {
         private val DELAY_OPTIONS = arrayOf(29, 37, 43, 47, 53, 59)
     }
 
+    private lateinit var binding: ActivityMainBinding
     private lateinit var playButton: Button
     private lateinit var recordButton: Button
     private lateinit var pitchTextView: TextView
@@ -59,6 +62,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var delay3Spinner: Spinner
     private lateinit var reverbSwitch: Switch
     private lateinit var playerView: PlayerView
+    private lateinit var pitchVisualizer: PitchVisualizerView
     
     private var audioRecord: AudioRecord? = null
     private var player: ExoPlayer? = null
@@ -78,7 +82,7 @@ class MainActivity : AppCompatActivity() {
     private var pitchAmplitudeData = mutableListOf<PitchAmplitudeData>()
     
     // Add FFT analyzer
-    private lateinit var analyzer: Analyzer
+    private lateinit var fftAnalyzer: FFTAnalyzer
     
     // Data class to store pitch and amplitude data with timestamps
     data class PitchAmplitudeData(
@@ -97,23 +101,24 @@ class MainActivity : AppCompatActivity() {
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
         
-        // Initialize FFT analyzer
-        analyzer = Analyzer()
+        fftAnalyzer = FFTAnalyzer()
+        pitchVisualizer = binding.pitchVisualizer
         
-        playButton = findViewById(R.id.playButton)
-        recordButton = findViewById(R.id.recordButton)
-        pitchTextView = findViewById(R.id.pitchTextView)
-        amplitudeTextView = findViewById(R.id.amplitudeTextView)
-        gainSeekBar = findViewById(R.id.gainSeekBar)
-        reverbMixSeekBar = findViewById(R.id.reverbMixSeekBar)
-        reverbDecaySeekBar = findViewById(R.id.reverbDecaySeekBar)
-        delay1Spinner = findViewById(R.id.delay1Spinner)
-        delay2Spinner = findViewById(R.id.delay2Spinner)
-        delay3Spinner = findViewById(R.id.delay3Spinner)
-        reverbSwitch = findViewById(R.id.reverbSwitch)
-        playerView = findViewById(R.id.playerView)
+        playButton = binding.playButton
+        recordButton = binding.recordButton
+        pitchTextView = binding.pitchTextView
+        amplitudeTextView = binding.amplitudeTextView
+        gainSeekBar = binding.gainSeekBar
+        reverbMixSeekBar = binding.reverbMixSeekBar
+        reverbDecaySeekBar = binding.reverbDecaySeekBar
+        delay1Spinner = binding.delay1Spinner
+        delay2Spinner = binding.delay2Spinner
+        delay3Spinner = binding.delay3Spinner
+        reverbSwitch = binding.reverbSwitch
+        playerView = binding.playerView
         
         setupGainControl()
         setupReverbControls()
@@ -608,10 +613,10 @@ class MainActivity : AppCompatActivity() {
                         }
                         
                         // Increased amplitude threshold to reduce false detections
-                        if (maxAmplitude > 0.05f) {  // Changed from 0.01f to 0.05f
+                        if (maxAmplitude > AMPLITUDE_THRESHOLD) {
                             val pitch = detectPitch(buffer)
                             runOnUiThread {
-                                if (pitch > 0 && pitch <= MAX_FREQUENCY) {  // Added upper limit check
+                                if (pitch > 0 && pitch <= MAX_FREQUENCY) {
                                     pitchTextView.text = String.format("%.1f Hz", pitch)
                                     Log.d(TAG, "Detected pitch: $pitch Hz, Amplitude: $maxAmplitude")
                                     
@@ -634,6 +639,7 @@ class MainActivity : AppCompatActivity() {
                                 pitchTextView.text = "No pitch detected"
                                 amplitudeTextView.text = getString(R.string.amplitude_format, String.format("%.2f", maxAmplitude))
                                 Log.d(TAG, "Amplitude too low: $maxAmplitude")
+                                pitchVisualizer.updatePitch(null, 0f)  // Clear visualizer when amplitude is too low
                             }
                         }
                     }
@@ -648,50 +654,24 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    private fun detectPitch(buffer: FloatArray): Float {
-        try {
-            // Calculate amplitude and log it
-            var maxAmplitude = 0f
-            for (sample in buffer) {
-                val abs = kotlin.math.abs(sample)
-                if (abs > maxAmplitude) {
-                    maxAmplitude = abs
-                }
-            }
-            
-            Log.d(TAG, "Pitch detection - Max amplitude: $maxAmplitude")
-            
-            if (maxAmplitude < 0.01f) {
-                Log.d(TAG, "Pitch detection - Amplitude too low, skipping")
-                return -1f
-            }
-            
-            // Convert float samples to short samples for the analyzer
-            val shortBuffer = ShortArray(buffer.size)
-            for (i in buffer.indices) {
-                shortBuffer[i] = (buffer[i] * 32767f).toInt().toShort()
-            }
-            
-            // Add data to analyzer
-            for (sample in shortBuffer) {
-                analyzer.addData(sample)
-            }
-            
-            // Get the detected frequency
-            val frequency = analyzer.get_peak_freq()
-            
-            if (frequency > 0) {
-                Log.d(TAG, "Pitch detection - Found frequency: $frequency Hz")
-                return frequency.toFloat()
-            } else {
-                Log.d(TAG, "Pitch detection - No valid pitch detected")
-                return -1f
-            }
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in pitch detection: ${e.message}", e)
-            return -1f
+    private fun detectPitch(audioData: FloatArray): Float? {
+        val maxAmplitude = audioData.maxOf { abs(it) }
+        Log.d(TAG, "Max amplitude: $maxAmplitude")
+
+        if (maxAmplitude < AMPLITUDE_THRESHOLD) {
+            pitchVisualizer.updatePitch(null, 0f)
+            return null
         }
+
+        val frequency = fftAnalyzer.analyze(audioData)
+        if (frequency != null && frequency in MIN_FREQUENCY..MAX_FREQUENCY) {
+            Log.d(TAG, "Detected frequency: $frequency Hz")
+            pitchVisualizer.updatePitch(frequency, maxAmplitude)
+            return frequency
+        }
+
+        pitchVisualizer.updatePitch(null, 0f)
+        return null
     }
     
     private fun stopAudioProcessing() {
