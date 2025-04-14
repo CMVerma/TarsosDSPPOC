@@ -193,14 +193,24 @@ class MainActivity : AppCompatActivity() {
                 override fun onPlaybackStateChanged(state: Int) {
                     when (state) {
                         Player.STATE_ENDED -> {
-                            playerView.visibility = android.view.View.GONE
-                            playButton.text = getString(R.string.play)
+                            runOnUiThread {
+                                playerView.visibility = android.view.View.GONE
+                                playButton.text = getString(R.string.play)
+                                hideReverbControls()
+                            }
+                        }
+                        Player.STATE_READY -> {
+                            runOnUiThread {
+                                playerView.visibility = android.view.View.VISIBLE
+                            }
                         }
                     }
                 }
             })
         }
         playerView.player = player
+        // Hide the player controls
+        playerView.useController = false
     }
     
     private fun hasAudioPermission(): Boolean {
@@ -929,6 +939,10 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "Error saving pitch and amplitude data: ${e.message}", e)
         }
+    }
+
+    private fun hideReverbControls() {
+        // Implementation of hideReverbControls method
     }
 
     override fun onDestroy() {
