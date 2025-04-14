@@ -3,6 +3,9 @@
     <string name="app_name">TarsosDSP POC</string>
     <string name="start">Start</string>
     <string name="stop">Stop</string>
-    <string name="pitch_format">Pitch: %1$s Hz</string>
-    <string name="amplitude_format">Amplitude: %1$s</string>
+    <string name="play">Play</string>
+    <string name="record">Record</string>
+    <string name="stop_recording">Stop</string>
+    <string name="pitch_format">Pitch: %s</string>
+    <string name="amplitude_format">Amplitude: %s</string>
 </resources> 
