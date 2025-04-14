@@ -34,14 +34,14 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "MainActivity"
         private const val SAMPLE_RATE = 44100  // Standard audio rate
-        private const val BUFFER_SIZE = 2048   // Reduced buffer size for lower latency
+        private const val BUFFER_SIZE = 2048   // Match FFT size
         private const val BUFFER_OVERLAP = 1024 // 50% overlap
         private const val PERMISSION_REQUEST_CODE = 123
         private const val STORAGE_PERMISSION_REQUEST_CODE = 124
         private const val MIN_FREQUENCY = 50.0f  // Hz
         private const val MAX_FREQUENCY = 1000.0f // Hz
-        private const val DEFAULT_GAIN = 1.0f
-        private const val MAX_GAIN = 3.0f
+        private const val DEFAULT_GAIN = 2.0f    // Increased default gain
+        private const val MAX_GAIN = 5.0f        // Increased max gain
         private const val DEFAULT_REVERB_MIX = 0.4f
         private const val DEFAULT_REVERB_DECAY = 0.7f
         private val DELAY_OPTIONS = arrayOf(29, 37, 43, 47, 53, 59)
@@ -92,9 +92,14 @@ class MainActivity : AppCompatActivity() {
     private var delayPos2 = 0
     private var delayPos3 = 0
     
+    private lateinit var fftAnalyzer: FFTAnalyzer
+    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        
+        // Initialize FFT analyzer
+        fftAnalyzer = FFTAnalyzer()
         
         playButton = findViewById(R.id.playButton)
         recordButton = findViewById(R.id.recordButton)
@@ -242,7 +247,7 @@ class MainActivity : AppCompatActivity() {
                 val minBufferSize = AudioRecord.getMinBufferSize(
                     SAMPLE_RATE,
                     AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_FLOAT
+                    AudioFormat.ENCODING_PCM_16BIT
                 )
                 
                 if (minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
@@ -254,16 +259,16 @@ class MainActivity : AppCompatActivity() {
                 Log.d(TAG, "Min buffer size: $minBufferSize")
                 
                 audioRecord = AudioRecord(
-                    MediaRecorder.AudioSource.MIC,
+                    MediaRecorder.AudioSource.VOICE_RECOGNITION,  // Changed to VOICE_RECOGNITION
                     SAMPLE_RATE,
                     AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_FLOAT,
+                    AudioFormat.ENCODING_PCM_16BIT,
                     minBufferSize
                 )
                 
                 if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
                     Log.e(TAG, "AudioRecord initialization failed")
-                    Toast.makeText(this, "Error: Failed to initialize audio recorder", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "Failed to initialize audio recorder", Toast.LENGTH_SHORT).show()
                     return
                 }
                 
@@ -288,7 +293,6 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun writeWavHeader(outputStream: FileOutputStream) {
-        // WAV header format
         val header = ByteArray(44)
         
         // RIFF header
@@ -321,8 +325,8 @@ class MainActivity : AppCompatActivity() {
         header[18] = 0
         header[19] = 0
         
-        // Audio format (IEEE float = 3)
-        header[20] = 3
+        // Audio format (PCM = 1)
+        header[20] = 1
         header[21] = 0
         
         // Number of channels (1 = mono)
@@ -336,18 +340,18 @@ class MainActivity : AppCompatActivity() {
         header[27] = (SAMPLE_RATE shr 24 and 0xFF).toByte()
         
         // Byte rate (sample rate * channels * bytes per sample)
-        val byteRate = SAMPLE_RATE * 1 * 4
+        val byteRate = SAMPLE_RATE * 1 * 2
         header[28] = (byteRate and 0xFF).toByte()
         header[29] = (byteRate shr 8 and 0xFF).toByte()
         header[30] = (byteRate shr 16 and 0xFF).toByte()
         header[31] = (byteRate shr 24 and 0xFF).toByte()
         
         // Block align (channels * bytes per sample)
-        header[32] = 4
+        header[32] = 2
         header[33] = 0
         
-        // Bits per sample (32 for float)
-        header[34] = 32
+        // Bits per sample (16 for PCM)
+        header[34] = 16
         header[35] = 0
         
         // Data chunk
@@ -547,22 +551,48 @@ class MainActivity : AppCompatActivity() {
             val minBufferSize = AudioRecord.getMinBufferSize(
                 SAMPLE_RATE,
                 AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_FLOAT
+                AudioFormat.ENCODING_PCM_16BIT
             )
             
             Log.d(TAG, "Min buffer size: $minBufferSize")
             
-            try {
-                audioRecord = AudioRecord(
-                    MediaRecorder.AudioSource.MIC,
-                    SAMPLE_RATE,
-                    AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_FLOAT,
-                    minBufferSize
-                )
-            } catch (e: SecurityException) {
-                Log.e(TAG, "Security exception when creating AudioRecord: ${e.message}", e)
-                Toast.makeText(this, "Permission denied for audio recording", Toast.LENGTH_SHORT).show()
+            // Try different audio sources in order of preference
+            val audioSources = arrayOf(
+                MediaRecorder.AudioSource.MIC,
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                MediaRecorder.AudioSource.DEFAULT
+            )
+            
+            var audioRecordCreated = false
+            
+            for (audioSource in audioSources) {
+                try {
+                    Log.d(TAG, "Trying audio source: $audioSource")
+                    audioRecord = AudioRecord(
+                        audioSource,
+                        SAMPLE_RATE,
+                        AudioFormat.CHANNEL_IN_MONO,
+                        AudioFormat.ENCODING_PCM_16BIT,
+                        minBufferSize
+                    )
+                    
+                    if (audioRecord?.state == AudioRecord.STATE_INITIALIZED) {
+                        Log.d(TAG, "AudioRecord initialized successfully with source: $audioSource")
+                        audioRecordCreated = true
+                        break
+                    } else {
+                        Log.e(TAG, "AudioRecord initialization failed with source: $audioSource")
+                        audioRecord?.release()
+                        audioRecord = null
+                    }
+                } catch (e: SecurityException) {
+                    Log.e(TAG, "Security exception when creating AudioRecord with source $audioSource: ${e.message}", e)
+                }
+            }
+            
+            if (!audioRecordCreated) {
+                Log.e(TAG, "Failed to initialize AudioRecord with any audio source")
+                Toast.makeText(this, "Failed to initialize audio recorder", Toast.LENGTH_SHORT).show()
                 return
             }
             
@@ -570,66 +600,81 @@ class MainActivity : AppCompatActivity() {
             audioRecord?.startRecording()
             
             Thread {
-                val buffer = FloatArray(BUFFER_SIZE)
-                val byteBuffer = ByteBuffer.allocate(buffer.size * 4).order(ByteOrder.LITTLE_ENDIAN)
+                val buffer = ShortArray(BUFFER_SIZE)
+                val floatBuffer = FloatArray(BUFFER_SIZE)
+                val byteBuffer = ByteBuffer.allocate(buffer.size * 2).order(ByteOrder.LITTLE_ENDIAN)
                 
                 while (isRecording) {
-                    val readSize = audioRecord?.read(buffer, 0, BUFFER_SIZE, AudioRecord.READ_BLOCKING) ?: 0
-                    
-                    if (readSize > 0) {
-                        // Apply gain only
-                        for (i in 0 until readSize) {
-                            buffer[i] = buffer[i].coerceIn(-1f, 1f) * currentGain
-                        }
+                    try {
+                        val readSize = audioRecord?.read(buffer, 0, BUFFER_SIZE, AudioRecord.READ_BLOCKING) ?: 0
                         
-                        // Save to file only if manual recording is active
-                        if (isManualRecording) {
-                            byteBuffer.clear()
+                        if (readSize > 0) {
+                            Log.d(TAG, "Read $readSize samples from audio input")
+                            
+                            // Convert to float and apply gain
                             for (i in 0 until readSize) {
-                                val sample = buffer[i].coerceIn(-1f, 1f)
-                                byteBuffer.putFloat(sample)
+                                // Normalize to [-1, 1] range
+                                floatBuffer[i] = (buffer[i].toFloat() / Short.MAX_VALUE.toFloat()).coerceIn(-1f, 1f) * currentGain
                             }
-                            recordingOutputStream?.write(byteBuffer.array(), 0, readSize * 4)
-                            totalBytesWritten += readSize * 4
-                        }
-                        
-                        var maxAmplitude = 0f
-                        for (sample in buffer) {
-                            val abs = kotlin.math.abs(sample)
-                            if (abs > maxAmplitude) {
-                                maxAmplitude = abs
-                            }
-                        }
-                        
-                        // Increased amplitude threshold to reduce false detections
-                        if (maxAmplitude > 0.05f) {  // Changed from 0.01f to 0.05f
-                            val pitch = detectPitch(buffer)
-                            runOnUiThread {
-                                if (pitch > 0 && pitch <= MAX_FREQUENCY) {  // Added upper limit check
-                                    pitchTextView.text = String.format("%.1f Hz", pitch)
-                                    Log.d(TAG, "Detected pitch: $pitch Hz, Amplitude: $maxAmplitude")
-                                    
-                                    // Store pitch and amplitude data if manual recording is active
-                                    if (isManualRecording) {
-                                        pitchAmplitudeData.add(PitchAmplitudeData(
-                                            System.currentTimeMillis(),
-                                            pitch,
-                                            maxAmplitude
-                                        ))
-                                    }
-                                } else {
-                                    pitchTextView.text = "No pitch detected"
-                                    Log.d(TAG, "No valid pitch detected. Amplitude: $maxAmplitude")
+                            
+                            // Save to file only if manual recording is active
+                            if (isManualRecording) {
+                                byteBuffer.clear()
+                                for (i in 0 until readSize) {
+                                    byteBuffer.putShort(buffer[i])
                                 }
-                                amplitudeTextView.text = getString(R.string.amplitude_format, String.format("%.2f", maxAmplitude))
+                                recordingOutputStream?.write(byteBuffer.array(), 0, readSize * 2)
+                                totalBytesWritten += readSize * 2
                             }
-                        } else {
-                            runOnUiThread {
-                                pitchTextView.text = "No pitch detected"
-                                amplitudeTextView.text = getString(R.string.amplitude_format, String.format("%.2f", maxAmplitude))
-                                Log.d(TAG, "Amplitude too low: $maxAmplitude")
+                            
+                            var maxAmplitude = 0f
+                            for (sample in floatBuffer) {
+                                val abs = kotlin.math.abs(sample)
+                                if (abs > maxAmplitude) {
+                                    maxAmplitude = abs
+                                }
+                            }
+                            
+                            Log.d(TAG, "Max amplitude: $maxAmplitude")
+                            
+                            // Lowered threshold for better sensitivity
+                            if (maxAmplitude > 0.001f) {  // Further reduced threshold
+                                try {
+                                    Log.d(TAG, "Attempting pitch detection...")
+                                    val pitch = fftAnalyzer.detectPitch(floatBuffer)
+                                    Log.d(TAG, "Pitch detection result: $pitch")
+                                    
+                                    runOnUiThread {
+                                        if (pitch > 0) {
+                                            pitchTextView.text = String.format("%.1f Hz", pitch)
+                                            Log.d(TAG, "Detected pitch: $pitch Hz, Amplitude: $maxAmplitude")
+                                            
+                                            if (isManualRecording) {
+                                                pitchAmplitudeData.add(PitchAmplitudeData(
+                                                    System.currentTimeMillis(),
+                                                    pitch,
+                                                    maxAmplitude
+                                                ))
+                                            }
+                                        } else {
+                                            pitchTextView.text = "No pitch detected"
+                                            Log.d(TAG, "No valid pitch detected. Amplitude: $maxAmplitude")
+                                        }
+                                        amplitudeTextView.text = getString(R.string.amplitude_format, String.format("%.2f", maxAmplitude))
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Error during pitch detection: ${e.message}", e)
+                                }
+                            } else {
+                                runOnUiThread {
+                                    pitchTextView.text = "No pitch detected"
+                                    amplitudeTextView.text = getString(R.string.amplitude_format, String.format("%.2f", maxAmplitude))
+                                    Log.d(TAG, "Amplitude too low: $maxAmplitude")
+                                }
                             }
                         }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error in audio processing loop: ${e.message}", e)
                     }
                 }
             }.start()
@@ -644,95 +689,8 @@ class MainActivity : AppCompatActivity() {
     
     private fun detectPitch(buffer: FloatArray): Float {
         try {
-            // Calculate amplitude and log it
-            var maxAmplitude = 0f
-            for (sample in buffer) {
-                val abs = kotlin.math.abs(sample)
-                if (abs > maxAmplitude) {
-                    maxAmplitude = abs
-                }
-            }
-            
-            Log.d(TAG, "Pitch detection - Max amplitude: $maxAmplitude")
-            
-            if (maxAmplitude < 0.01f) {
-                Log.d(TAG, "Pitch detection - Amplitude too low, skipping")
-                return -1f
-            }
-            
-            // Apply Hanning window and normalize
-            val windowedBuffer = FloatArray(buffer.size)
-            var maxWindowedAmplitude = 0f
-            for (i in buffer.indices) {
-                val windowValue = 0.5f * (1 - cos(2 * PI.toFloat() * i / (buffer.size - 1)))
-                windowedBuffer[i] = buffer[i] * windowValue
-                maxWindowedAmplitude = maxOf(maxWindowedAmplitude, abs(windowedBuffer[i]))
-            }
-            
-            // Normalize windowed buffer
-            for (i in windowedBuffer.indices) {
-                windowedBuffer[i] /= maxWindowedAmplitude
-            }
-            
-            Log.d(TAG, "Pitch detection - Applied Hanning window and normalized")
-            
-            // Calculate autocorrelation
-            val correlation = FloatArray(buffer.size / 2)
-            for (lag in correlation.indices) {
-                var sum = 0f
-                for (i in 0 until buffer.size - lag) {
-                    sum += windowedBuffer[i] * windowedBuffer[i + lag]
-                }
-                correlation[lag] = sum
-            }
-            
-            Log.d(TAG, "Pitch detection - Calculated autocorrelation")
-            
-            // Find peaks in autocorrelation
-            var maxCorrelation = Float.NEGATIVE_INFINITY
-            var peakLag = -1
-            var foundPeak = false
-            val minLag = (SAMPLE_RATE / MAX_FREQUENCY).toInt()
-            val maxLag = (SAMPLE_RATE / MIN_FREQUENCY).toInt()
-            
-            Log.d(TAG, "Pitch detection - Searching for peaks between $minLag and $maxLag samples")
-            
-            // First pass: find the maximum correlation
-            for (lag in minLag until maxLag) {
-                if (correlation[lag] > maxCorrelation) {
-                    maxCorrelation = correlation[lag]
-                    peakLag = lag
-                    foundPeak = true
-                }
-            }
-            
-            if (!foundPeak) {
-                Log.d(TAG, "Pitch detection - No peak found")
-                return -1f
-            }
-            
-            // Verify the peak is significant
-            val threshold = maxCorrelation * 0.8f  // Peak should be at least 80% of max
-            var isPeakSignificant = true
-            
-            // Check if there are any larger peaks at lower lags
-            for (lag in minLag until peakLag) {
-                if (correlation[lag] > correlation[peakLag]) {
-                    isPeakSignificant = false
-                    break
-                }
-            }
-            
-            if (!isPeakSignificant) {
-                Log.d(TAG, "Pitch detection - Peak not significant enough")
-                return -1f
-            }
-            
-            val frequency = SAMPLE_RATE.toFloat() / peakLag
-            Log.d(TAG, "Pitch detection - Found frequency: $frequency Hz at lag $peakLag (correlation: ${correlation[peakLag]})")
-            
-            return frequency
-            
+            // Use FFT analyzer for pitch detection directly
+            return fftAnalyzer.detectPitch(buffer)
         } catch (e: Exception) {
             Log.e(TAG, "Error in pitch detection: ${e.message}", e)
             return -1f
